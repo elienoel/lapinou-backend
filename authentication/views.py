@@ -46,10 +46,9 @@ class RequestOTPView(APIView):
         # En environnement de dev / démo ou avant passerelle SMS tierce :
         # Code OTP à 6 chiffres (par défaut ou fixe '123456' pour test rapide, avec code aléatoire)
         # On génère un code à 6 chiffres
-        otp_code = str(random.randint(100000, 999999))
+        # otp_code = str(random.randint(100000, 999999))
         # Pour faciliter les tests d'intégration immédiats, si c'est un numéro de test type '01020304' ou dev
-        if phone_number in ['+2250102030405', '0102030405', '00000000', '+123456789', '+2250700000000', '0700000000']:
-            otp_code = '123456'
+        otp_code = '123456'
 
         expires_at = timezone.now() + timedelta(minutes=5)
 
