@@ -54,10 +54,10 @@ class RabbitSerializer(serializers.ModelSerializer, UserActionMixinSerializer):
             'dam', 'dam_name', 'dam_tag',
             'status', 'status_display', 'weight_kg', 'photo',
             'images',
-            'avatar_color_index', 'notes', 'created_at', 'updated_at',
+            'avatar_color_index', 'notes', 'client_uuid', 'is_deleted', 'created_at', 'updated_at',
             'created_by_user'
         ]
-        read_only_fields = ['id', 'owner', 'images', 'nursing_kits', 'created_at', 'updated_at', 'created_by_user']
+        read_only_fields = ['id', 'owner', 'images', 'nursing_kits', 'is_deleted', 'created_at', 'updated_at', 'created_by_user']
 
     def validate(self, attrs):
         instance = self.instance
@@ -117,14 +117,14 @@ class CageSerializer(serializers.ModelSerializer, UserActionMixinSerializer):
             'id', 'owner', 'name', 'location', 'rows_count', 'columns_count',
             'compartments_count',
             'occupied_count', 'rabbits_count', 'kits_count', 'compartments', 'notes',
-            'created_at', 'updated_at', 'created_by_user'
+            'client_uuid', 'is_deleted', 'created_at', 'updated_at', 'created_by_user'
         ]
-        read_only_fields = ['id', 'owner', 'created_at', 'updated_at', 'created_by_user']
+        read_only_fields = ['id', 'owner', 'is_deleted', 'created_at', 'updated_at', 'created_by_user']
 
     def _occupants(self, cage):
         """Lapins de la cage regroupés par numéro de loge (plusieurs par loge possible)."""
         grouped = {}
-        for r in cage.rabbits.all():
+        for r in cage.rabbits.filter(is_deleted=False):
             if r.compartment_number:
                 grouped.setdefault(r.compartment_number, []).append(r)
         return grouped
@@ -179,7 +179,7 @@ class CageSerializer(serializers.ModelSerializer, UserActionMixinSerializer):
     def validate(self, attrs):
         if self.instance is None:
             return attrs
-        occupied = [r.compartment_number for r in self.instance.rabbits.all() if r.compartment_number]
+        occupied = [r.compartment_number for r in self.instance.rabbits.filter(is_deleted=False) if r.compartment_number]
         if not occupied:
             return attrs
         rows = attrs.get('rows_count', self.instance.rows_count)
@@ -223,10 +223,10 @@ class MatingSerializer(serializers.ModelSerializer, UserActionMixinSerializer):
             'female', 'female_name', 'female_tag',
             'mating_date', 'status', 'status_display',
             'palpation_date', 'palpation_done_at', 'nest_box_date', 'expected_kindling_date',
-            'notes', 'created_at', 'updated_at', 'created_by_user'
+            'notes', 'client_uuid', 'is_deleted', 'created_at', 'updated_at', 'created_by_user'
         ]
         # La palpation se confirme par l'action `palpation`, l'échec par l'action `cancel`
-        read_only_fields = ['id', 'owner', 'palpation_done_at', 'created_at', 'updated_at', 'created_by_user']
+        read_only_fields = ['id', 'owner', 'palpation_done_at', 'is_deleted', 'created_at', 'updated_at', 'created_by_user']
 
     def validate(self, attrs):
         male = attrs.get('male', getattr(self.instance, 'male', None))
@@ -265,13 +265,13 @@ class LitterSerializer(serializers.ModelSerializer, UserActionMixinSerializer):
             'birth_date', 'born_alive', 'still_born', 'died_count', 'total_born',
             'weaned_count', 'weaned_at', 'weaning_date',
             'kits_remaining', 'age_days', 'days_until_weaning', 'weaning_status',
-            'notes', 'created_at', 'updated_at', 'created_by_user'
+            'notes', 'client_uuid', 'is_deleted', 'created_at', 'updated_at', 'created_by_user'
         ]
         # Le sevrage (`weaned_count`, `weaned_at`) ne se modifie que par l'action `wean`
         read_only_fields = [
             'id', 'owner', 'total_born', 'weaned_count', 'weaned_at',
             'kits_remaining', 'age_days', 'days_until_weaning', 'weaning_status',
-            'created_at', 'updated_at', 'created_by_user'
+            'is_deleted', 'created_at', 'updated_at', 'created_by_user'
         ]
         # La mère et le père sont déduits de l'accouplement sélectionné
         extra_kwargs = {'mother': {'required': False}, 'father': {'required': False}}
@@ -336,13 +336,13 @@ class CareTreatmentSerializer(serializers.ModelSerializer, UserActionMixinSerial
         model = CareTreatment
         fields = [
             'id', 'owner', 'name', 'category', 'category_display', 'renewal_days',
-            'notes', 'records_count', 'created_at', 'updated_at', 'created_by_user'
+            'notes', 'records_count', 'client_uuid', 'is_deleted', 'created_at', 'updated_at', 'created_by_user'
         ]
-        read_only_fields = ['id', 'owner', 'records_count', 'created_at', 'updated_at', 'created_by_user']
+        read_only_fields = ['id', 'owner', 'records_count', 'is_deleted', 'created_at', 'updated_at', 'created_by_user']
 
     @extend_schema_field(serializers.IntegerField())
     def get_records_count(self, obj):
-        return obj.records.count()
+        return obj.records.filter(is_deleted=False).count()
 
     def validate_name(self, value):
         value = value.strip()
@@ -373,10 +373,10 @@ class CareRecordSerializer(serializers.ModelSerializer, UserActionMixinSerialize
             'id', 'owner', 'treatment', 'treatment_name', 'treatment_category',
             'treatment_category_display', 'renewal_days',
             'rabbits', 'rabbits_detail', 'date', 'purpose',
-            'next_due_date', 'days_until_due', 'notes',
+            'next_due_date', 'days_until_due', 'notes', 'client_uuid',
             'created_at', 'updated_at', 'created_by_user'
         ]
-        read_only_fields = ['id', 'owner', 'days_until_due', 'created_at', 'updated_at', 'created_by_user']
+        read_only_fields = ['id', 'owner', 'days_until_due', 'is_deleted', 'created_at', 'updated_at', 'created_by_user']
         extra_kwargs = {
             'rabbits': {'error_messages': {'empty': "Sélectionnez au moins un lapin soigné."}},
         }
@@ -438,10 +438,10 @@ class CareEventSerializer(serializers.ModelSerializer, UserActionMixinSerializer
         fields = [
             'id', 'owner', 'rabbit', 'rabbit_name', 'rabbit_tag',
             'care_type', 'care_type_display', 'title', 'date',
-            'reminder_date', 'is_completed', 'notes',
+            'reminder_date', 'is_completed', 'notes', 'client_uuid',
             'created_at', 'updated_at', 'created_by_user'
         ]
-        read_only_fields = ['id', 'owner', 'created_at', 'updated_at', 'created_by_user']
+        read_only_fields = ['id', 'owner', 'is_deleted', 'created_at', 'updated_at', 'created_by_user']
 
 
 class FinanceTransactionSerializer(serializers.ModelSerializer, UserActionMixinSerializer):
@@ -454,8 +454,8 @@ class FinanceTransactionSerializer(serializers.ModelSerializer, UserActionMixinS
         model = FinanceTransaction
         fields = [
             'id', 'owner', 'transaction_type', 'transaction_type_display',
-            'title', 'amount', 'date', 'category', 'notes',
+            'title', 'amount', 'date', 'category', 'notes', 'client_uuid',
             'created_at', 'updated_at', 'created_by_user'
         ]
-        read_only_fields = ['id', 'owner', 'created_at', 'updated_at', 'created_by_user']
+        read_only_fields = ['id', 'owner', 'is_deleted', 'created_at', 'updated_at', 'created_by_user']
 

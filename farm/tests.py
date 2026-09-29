@@ -1,3 +1,4 @@
+import uuid
 from datetime import date, timedelta
 
 from django.contrib.auth import get_user_model
@@ -725,3 +726,60 @@ class CareTests(APITestCase):
         res = self.client.get(f'/api/farm/care-records/?all=true&rabbits={self.bella.id}')
         self.assertEqual(len(res.data['data']), 1)
         self.assertEqual(res.data['data'][0]['rabbits'], [self.bella.id])
+
+
+class OfflineSyncTests(APITestCase):
+    """
+    Garde-fous nécessaires à la synchronisation hors-ligne du mobile :
+    créations idempotentes (retry réseau après coupure) et suppression douce
+    (pour que le pull de synchro détecte les suppressions).
+    """
+
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user(username='eleveur-sync', password='x')
+        self.client = APIClient()
+        self.client.force_authenticate(self.user)
+        self.born = date.today() - timedelta(days=400)
+
+    def test_repeated_create_with_same_client_uuid_is_idempotent(self):
+        client_uuid = str(uuid.uuid4())
+        payload = {
+            'name': 'Flash', 'tag_number': 'M1', 'gender': 'M',
+            'birth_date': str(self.born), 'client_uuid': client_uuid,
+        }
+        first = self.client.post('/api/farm/rabbits/', payload, format='json')
+        self.assertEqual(first.status_code, 201, first.content)
+
+        # Retry réseau : même client_uuid renvoyé une seconde fois, pas de doublon créé.
+        second = self.client.post('/api/farm/rabbits/', payload, format='json')
+        self.assertEqual(second.status_code, 201, second.content)
+        self.assertEqual(first.data['data']['id'], second.data['data']['id'])
+        self.assertEqual(Rabbit.objects.filter(owner=self.user, tag_number='M1').count(), 1)
+
+    def test_deleted_rabbit_is_soft_deleted_and_hidden_by_default(self):
+        rabbit = Rabbit.objects.create(
+            owner=self.user, name='Flash', tag_number='M1', gender='M', birth_date=self.born
+        )
+        res = self.client.delete(f'/api/farm/rabbits/{rabbit.id}/')
+        self.assertEqual(res.status_code, 200, res.content)
+
+        # Toujours en base (tombstone), mais masqué de la liste par défaut...
+        self.assertEqual(Rabbit.objects.filter(pk=rabbit.id, is_deleted=True).count(), 1)
+        listed = self.client.get('/api/farm/rabbits/?all=true').data['data']
+        self.assertNotIn(rabbit.id, [r['id'] for r in listed])
+
+        # ...et visible pour le pull de synchro qui a besoin de détecter la suppression.
+        with_deleted = self.client.get('/api/farm/rabbits/?all=true&include_deleted=true').data['data']
+        self.assertIn(rabbit.id, [r['id'] for r in with_deleted])
+
+    def test_soft_deleted_rabbit_frees_its_cage_compartment(self):
+        cage = Cage.objects.create(owner=self.user, name='A1', rows_count=2)
+        rabbit = Rabbit.objects.create(
+            owner=self.user, name='Flash', tag_number='M1', gender='M', birth_date=self.born,
+            cage=cage, compartment_number=1,
+        )
+        self.client.delete(f'/api/farm/rabbits/{rabbit.id}/')
+        detail = self.client.get(f'/api/farm/cages/{cage.id}/').data['data']
+        self.assertEqual(detail['occupied_count'], 0)
+        self.assertEqual(detail['compartments'][0]['rabbit'], None)

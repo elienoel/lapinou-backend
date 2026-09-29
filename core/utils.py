@@ -323,7 +323,7 @@ def apply_query_filters(queryset, request, filterset_fields=None, search_fields=
     # Traitement des filtres individuels
     system_keys = {
         'order_by', 'page', 'page_size', 'all', 'export', 'global_search',
-        'search', 'search_type', 'tab', 'format'
+        'search', 'search_type', 'tab', 'format', 'include_deleted'
     }
     for key, val in request.GET.items():
         if key in system_keys or val is None or val == '' or val in ['null', 'undefined', 'None']:
@@ -743,6 +743,14 @@ class CustomViewSet(viewsets.ViewSet):
                 f"'{self.__class__.__name__}' doit définir `queryset` ou redéfinir `get_queryset()`."
             )
 
+        # Suppression douce : masquée par défaut, sauf pour le pull de synchro hors-ligne
+        # du mobile qui a besoin de voir les tombstones (?include_deleted=true).
+        model_fields = [f.name for f in qs.model._meta.fields]
+        if 'is_deleted' in model_fields:
+            include_deleted = getattr(self, 'request', None) and self.request.GET.get('include_deleted', 'false').lower() == 'true'
+            if not include_deleted:
+                qs = qs.filter(is_deleted=False)
+
         # Isolation des données par utilisateur/éleveur si applicable
         user = getattr(self.request, 'user', None)
         if user and user.is_authenticated and not user.is_superuser:
@@ -884,13 +892,29 @@ class CustomViewSet(viewsets.ViewSet):
     def create(self, request):
         try:
             extra_args = get_extra_args(request=request)
+            model = self.queryset.model if self.queryset is not None else None
+
+            # Idempotence : si le client renvoie un client_uuid déjà connu (retry réseau
+            # après une coupure, cas typique de la synchro hors-ligne mobile), on renvoie
+            # l'enregistrement existant au lieu d'en créer un doublon.
+            client_uuid = request.data.get('client_uuid') if hasattr(request.data, 'get') else None
+            if client_uuid and model is not None and 'client_uuid' in [f.name for f in model._meta.fields]:
+                existing = self.get_queryset().filter(client_uuid=client_uuid).first()
+                if existing is not None:
+                    serializer = self.serializer_class(existing, context={'extra_args': extra_args, 'request': request})
+                    return Response(build_success_response(
+                        data=serializer.data,
+                        message_code='data-saved',
+                        message_default='Information enregistrée avec succès',
+                        message_details=''
+                    ), status=status.HTTP_201_CREATED)
+
             serializer = self.serializer_class(
                 data=request.data,
                 context={'extra_args': extra_args, 'request': request}
             )
 
             if serializer.is_valid():
-                model = self.queryset.model if self.queryset is not None else None
                 save_kwargs = {}
                 if model:
                     model_fields = [f.name for f in model._meta.fields]
@@ -989,7 +1013,15 @@ class CustomViewSet(viewsets.ViewSet):
     def destroy(self, request, pk=None):
         try:
             instance = self.get_object(pk=pk)
-            instance.delete()
+
+            # Suppression douce quand le modèle la supporte : la synchro hors-ligne du
+            # mobile a besoin de voir ces tombstones pour propager la suppression.
+            if hasattr(instance, 'is_deleted'):
+                instance.is_deleted = True
+                instance.deleted_at = timezone.now()
+                instance.save(update_fields=['is_deleted', 'deleted_at'])
+            else:
+                instance.delete()
 
             return Response(build_success_response(
                 data={},

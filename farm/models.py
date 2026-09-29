@@ -6,6 +6,23 @@ from django.db import models
 from django.utils import timezone
 
 
+class SyncableModel(models.Model):
+    """
+    Champs communs aux modèles Farm synchronisables depuis le mode hors-ligne mobile.
+
+    - client_uuid : identifiant généré côté client à la création, utilisé pour rendre
+      les créations idempotentes (un retry réseau après coupure ne crée pas de doublon).
+    - is_deleted/deleted_at : suppression douce, pour que le mobile puisse détecter
+      lors d'une synchronisation qu'un enregistrement a été supprimé côté serveur.
+    """
+    client_uuid = models.UUIDField(null=True, blank=True, unique=True)
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        abstract = True
+
+
 class Breed(models.Model):
     """
     Race de lapin (Fauve de Bourgogne, Néo-Zélandais, Géant des Flandres, Papillon, etc.)
@@ -21,7 +38,7 @@ class Breed(models.Model):
         return self.name
 
 
-class Cage(models.Model):
+class Cage(SyncableModel):
     """
     Cage d'élevage : une grille de loges (lignes x colonnes).
     Les loges sont numérotées ligne par ligne, de haut en bas puis de gauche à droite
@@ -70,7 +87,7 @@ class Cage(models.Model):
         return f"Cage {self.name} ({self.rows_count}x{self.columns_count} loges)"
 
 
-class Rabbit(models.Model):
+class Rabbit(SyncableModel):
     """
     Représentation d'un lapin reproducteur ou d'élevage.
     Inclut l'arbre généalogique via sire (père) et dam (mère).
@@ -156,7 +173,7 @@ class Rabbit(models.Model):
     @property
     def nursing_kits(self):
         """Lapereaux encore au nid avec cette lapine (ils la suivent quand on la déplace)."""
-        return sum(litter.kits_remaining for litter in self.litters_as_mother.all())
+        return sum(litter.kits_remaining for litter in self.litters_as_mother.filter(is_deleted=False))
 
     def __str__(self):
         return f"{self.name} ({self.tag_number})"
@@ -183,7 +200,7 @@ class RabbitImage(models.Model):
         return f"Photo de {self.rabbit.name} ({'Principale' if self.is_primary else 'Galerie'})"
 
 
-class Mating(models.Model):
+class Mating(SyncableModel):
     """
     Accouplement / Saillie entre un mâle et une femelle.
     """
@@ -238,7 +255,7 @@ class Mating(models.Model):
         return f"Accouplement {self.male.name} x {self.female.name} le {self.mating_date}"
 
 
-class Litter(models.Model):
+class Litter(SyncableModel):
     """
     Mise bas / Portée de lapereaux.
     """
@@ -324,7 +341,7 @@ class Litter(models.Model):
         return f"Portée de {self.mother.name} du {self.birth_date} ({self.born_alive} vivants)"
 
 
-class CareTreatment(models.Model):
+class CareTreatment(SyncableModel):
     """
     Type de soin défini par l'éleveur (ex. « Vaccin VHD2 », « Vitamine ADE », « Ivermectine »)
     avec sa durée avant renouvellement. Sans durée, le soin est ponctuel (aucun rappel).
@@ -362,7 +379,7 @@ class CareTreatment(models.Model):
         return self.name
 
 
-class CareRecord(models.Model):
+class CareRecord(SyncableModel):
     """
     Soin effectué : quel traitement, quand, pourquoi et sur quels lapins.
     La prochaine échéance est calculée à partir de la date et de la durée de renouvellement.
@@ -407,7 +424,7 @@ class CareRecord(models.Model):
         return f"{self.treatment.name} le {self.date}"
 
 
-class CareEvent(models.Model):
+class CareEvent(SyncableModel):
     """
     Soin et suivi vétérinaire (vaccin, vermifuge, anti-parasite, etc.).
     """
@@ -445,7 +462,7 @@ class CareEvent(models.Model):
         return f"{self.title} - {self.rabbit.name} ({self.date})"
 
 
-class FinanceTransaction(models.Model):
+class FinanceTransaction(SyncableModel):
     """
     Suivi financier : Dépenses (aliment, paille, matériel, veto) et Ventes/Entrées d'argent.
     """

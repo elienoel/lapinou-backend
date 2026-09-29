@@ -1,6 +1,5 @@
 from datetime import timedelta
 from django.db import transaction
-from django.db.models import ProtectedError
 from django.utils import timezone
 from rest_framework import permissions, serializers as drf_serializers, status
 from rest_framework.decorators import action
@@ -580,7 +579,7 @@ class LitterViewSet(CustomViewSet):
                 if litter.kits_remaining == 0 and mother.status == Rabbit.Status.LACTATING:
                     still_nursing = any(
                         other.kits_remaining > 0
-                        for other in mother.litters_as_mother.exclude(pk=litter.pk)
+                        for other in mother.litters_as_mother.filter(is_deleted=False).exclude(pk=litter.pk)
                     )
                     if not still_nursing:
                         mother.status = Rabbit.Status.ACTIVE
@@ -622,14 +621,15 @@ class CareTreatmentViewSet(CustomViewSet):
 
     def destroy(self, request, pk=None):
         treatment = self.get_object(pk=pk)
-        try:
-            treatment.delete()
-        except ProtectedError:
+        if treatment.records.filter(is_deleted=False).exists():
             return Response(build_error_response(
                 message_default="Suppression impossible",
                 message_details="Ce type de soin a déjà été utilisé : supprimez d'abord les soins enregistrés.",
                 errors={'treatment': "Ce type de soin est utilisé dans l'historique des soins."}
             ), status=status.HTTP_400_BAD_REQUEST)
+        treatment.is_deleted = True
+        treatment.deleted_at = timezone.now()
+        treatment.save(update_fields=['is_deleted', 'deleted_at'])
         return Response(build_success_response(
             data={}, message_code='success', message_default='Données supprimées avec succès.'
         ))
@@ -671,7 +671,7 @@ class CareRecordViewSet(CustomViewSet):
         items = []
         for record in self.get_queryset().order_by('-date', '-id'):
             due_rabbits = []
-            for rabbit in record.rabbits.all():
+            for rabbit in record.rabbits.filter(is_deleted=False):
                 key = (rabbit.id, record.treatment_id)
                 if key in latest_seen:
                     continue
