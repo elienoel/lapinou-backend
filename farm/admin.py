@@ -16,13 +16,19 @@ from .models import (
 
 @admin.register(Breed)
 class BreedAdmin(admin.ModelAdmin):
-    list_display = ('id', 'name', 'average_gestation_days', 'description', 'rabbit_count')
+    list_display = (
+        'id', 'name', 'average_gestation_days', 'description', 'rabbit_count', 'has_image',
+    )
     list_filter = ('average_gestation_days',)
     search_fields = ('name', 'description')
 
     @admin.display(description='Lapins')
     def rabbit_count(self, obj):
         return obj.rabbits.count()
+
+    @admin.display(description='Image', boolean=True)
+    def has_image(self, obj):
+        return bool(obj.image)
 
 
 @admin.register(Cage)

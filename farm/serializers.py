@@ -15,7 +15,7 @@ class BreedSerializer(serializers.ModelSerializer):
     """
     class Meta:
         model = Breed
-        fields = ['id', 'name', 'description', 'average_gestation_days']
+        fields = ['id', 'name', 'description', 'average_gestation_days', 'image']
 
 
 class RabbitImageSerializer(serializers.ModelSerializer):

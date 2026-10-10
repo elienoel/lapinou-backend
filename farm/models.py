@@ -30,6 +30,7 @@ class Breed(models.Model):
     name = models.CharField(max_length=100, unique=True)
     description = models.TextField(blank=True, null=True)
     average_gestation_days = models.PositiveIntegerField(default=31)
+    image = models.ImageField(upload_to='breeds/', blank=True, null=True)
 
     class Meta:
         ordering = ['name']
