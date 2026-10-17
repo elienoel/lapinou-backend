@@ -42,7 +42,7 @@ class PostMediaTests(APITestCase):
 
     def test_post_with_images_and_video(self):
         res = self._post({
-            'content': 'Ma nouvelle portée 🐰',
+            'content': 'Ma nouvelle portée',
             'media': [png_file('a.png'), png_file('b.png'), video_file()],
         })
         self.assertEqual(res.status_code, 201, res.content)

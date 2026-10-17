@@ -39,7 +39,7 @@ class Command(BaseCommand):
             user.save(update_fields=['farm_name'])
 
         status_user = "créé" if created else "existant"
-        self.stdout.write(self.style.SUCCESS(f"✔ Utilisateur {user.username} ({user.phone_number}) [{status_user}]"))
+        self.stdout.write(self.style.SUCCESS(f"Utilisateur {user.username} ({user.phone_number}) [{status_user}]"))
 
         # Éleveur secondaire pour animer la communauté
         user_community, _ = User.objects.get_or_create(
@@ -71,7 +71,7 @@ class Command(BaseCommand):
                 defaults={'description': desc, 'average_gestation_days': gest}
             )
             created_breeds[name] = b
-        self.stdout.write(self.style.SUCCESS(f"✔ {len(created_breeds)} races enregistrées"))
+        self.stdout.write(self.style.SUCCESS(f"{len(created_breeds)} races enregistrées"))
 
         today = date.today()
 
@@ -243,7 +243,7 @@ class Command(BaseCommand):
                 'notes': 'Jeune femelle au repos avant sa première saillie.',
             }
         )
-        self.stdout.write(self.style.SUCCESS("✔ 8 lapins reproducteurs créés avec arbre généalogique 3 générations"))
+        self.stdout.write(self.style.SUCCESS("8 lapins reproducteurs créés avec arbre généalogique 3 générations"))
 
         # 4. Accouplements (Matings)
         mating_gestation_date = today - timedelta(days=27)
@@ -275,7 +275,7 @@ class Command(BaseCommand):
                 'notes': 'Mise bas réussie au 31e jour.',
             }
         )
-        self.stdout.write(self.style.SUCCESS("✔ 2 accouplements créés (1 gestation en cours J27 et 1 portée née)"))
+        self.stdout.write(self.style.SUCCESS("2 accouplements créés (1 gestation en cours J27 et 1 portée née)"))
 
         # 5. Mises bas (Litters)
         litter_date = today - timedelta(days=9)
@@ -292,7 +292,7 @@ class Command(BaseCommand):
                 'notes': 'Lapereaux vigoureux et bien nourris. Nid propre avec duvet abondant.',
             }
         )
-        self.stdout.write(self.style.SUCCESS("✔ 1 portée au nid enregistrée (7 lapereaux vivants)"))
+        self.stdout.write(self.style.SUCCESS("1 portée au nid enregistrée (7 lapereaux vivants)"))
 
         # 6. Soins sanitaires (CareEvents)
         CareEvent.objects.get_or_create(
@@ -332,7 +332,7 @@ class Command(BaseCommand):
                 'notes': 'Traitement dans l\'eau de boisson pendant 3 jours consécutifs.',
             }
         )
-        self.stdout.write(self.style.SUCCESS("✔ 3 soins vétérinaires enregistrés"))
+        self.stdout.write(self.style.SUCCESS("3 soins vétérinaires enregistrés"))
 
         # 7. Finances (Dépenses et Ventes)
         finances = [
@@ -354,12 +354,12 @@ class Command(BaseCommand):
                     'notes': notes,
                 }
             )
-        self.stdout.write(self.style.SUCCESS("✔ 5 transactions financières enregistrées (+145.00 € / -95.50 €)"))
+        self.stdout.write(self.style.SUCCESS("5 transactions financières enregistrées (+145.00 € / -95.50 €)"))
 
         # 8. Publications & Discussions Communauté
         post1, _ = Post.objects.get_or_create(
             author=user_community,
-            title="Conseils pour l'alimentation en période de forte chaleur ☀️",
+            title="Conseils pour l'alimentation en période de forte chaleur",
             defaults={
                 'content': "Bonjour à tous les éleveurs ! Avec les températures élevées en ce moment, pensez à distribuer les granulés très tôt le matin et tard le soir. L'eau fraîche à volonté avec un peu de vinaigre de cidre de pomme aide beaucoup nos lapins à réguler leur température corporelle.",
                 'tags': "alimentation,chaleur,santé",
@@ -376,14 +376,14 @@ class Command(BaseCommand):
 
         post2, _ = Post.objects.get_or_create(
             author=user,
-            title="Gestation confirmée chez Bella (Fauve de Bourgogne) 🐰🎉",
+            title="Gestation confirmée chez Bella (Fauve de Bourgogne)",
             defaults={
                 'content': "Palpation très nette à J12 chez Bella issue de la lignée Goliath x Perle. Boîte à nid installée ce matin, mise bas estimée d'ici 4 jours ! Les prédictions de l'application Lapinou facilitent grandement l'organisation.",
                 'tags': "mise bas,fauve de bourgogne,reproduction",
             }
         )
         PostLike.objects.get_or_create(post=post2, user=user_community)
-        self.stdout.write(self.style.SUCCESS("✔ Fil d'actualité communautaire et commentaires initialisés"))
+        self.stdout.write(self.style.SUCCESS("Fil d'actualité communautaire et commentaires initialisés"))
 
-        self.stdout.write(self.style.SUCCESS("\n🎉 Base de données peuplée avec succès !"))
+        self.stdout.write(self.style.SUCCESS("\nBase de données peuplée avec succès !"))
 
