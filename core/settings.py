@@ -65,6 +65,7 @@ INSTALLED_APPS = [
     'community.apps.CommunityConfig',
     'farm.apps.FarmConfig',
     'chat.apps.ChatConfig',
+    'pharmacy.apps.PharmacyConfig',
 ]
 
 MIDDLEWARE = [
