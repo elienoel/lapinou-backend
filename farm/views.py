@@ -423,6 +423,65 @@ class MatingViewSet(CustomViewSet):
         mating.save(update_fields=['status', 'palpation_done_at', 'updated_at'])
         return self._mating_response(request, mating, 'Palpation enregistrée : gestation confirmée')
 
+    def _parse_done_at(self, request, mating):
+        """Date `done_at` de la requête (aujourd'hui par défaut), entre la saillie et aujourd'hui.
+        Renvoie (date, None) ou (None, réponse d'erreur)."""
+        done_at = timezone.localdate()
+        if request.data.get('done_at'):
+            try:
+                done_at = drf_serializers.DateField().to_internal_value(request.data.get('done_at'))
+            except drf_serializers.ValidationError:
+                return None, Response(build_error_response(
+                    message_default='Date invalide', errors={'done_at': 'Date invalide.'}
+                ), status=status.HTTP_400_BAD_REQUEST)
+        if done_at < mating.mating_date or done_at > timezone.localdate():
+            return None, Response(build_error_response(
+                message_default='Date invalide',
+                errors={'done_at': "La date doit se situer entre la saillie et aujourd'hui."}
+            ), status=status.HTTP_400_BAD_REQUEST)
+        return done_at, None
+
+    @action(detail=True, methods=['post'], url_path='nest-box')
+    def nest_box(self, request, pk=None):
+        """
+        Enregistre la pose de la boîte à nid à la date `done_at` (aujourd'hui par défaut),
+        pendant la gestation (saillie en attente de palpation ou confirmée).
+        """
+        mating = self.get_object(pk=pk)
+        if mating.status not in (Mating.Status.PENDING, Mating.Status.CONFIRMED):
+            return Response(build_error_response(
+                message_default='Action impossible',
+                errors={'status': "La boîte à nid se pose pendant la gestation."}
+            ), status=status.HTTP_400_BAD_REQUEST)
+        done_at, error = self._parse_done_at(request, mating)
+        if error:
+            return error
+        mating.nest_box_done_at = done_at
+        mating.save(update_fields=['nest_box_done_at', 'updated_at'])
+        return self._mating_response(request, mating, 'Pose de la boîte à nid enregistrée')
+
+    @action(detail=True, methods=['post'])
+    def complete(self, request, pk=None):
+        """
+        Clôture l'accouplement comme réussi : uniquement après la mise bas, une fois
+        tous les lapereaux de la portée sevrés (ou morts au nid).
+        """
+        mating = self.get_object(pk=pk)
+        litter = getattr(mating, 'litter', None)
+        if mating.status != Mating.Status.KINDLED or litter is None:
+            return Response(build_error_response(
+                message_default='Action impossible',
+                errors={'status': "L'accouplement se clôture après la mise bas."}
+            ), status=status.HTTP_400_BAD_REQUEST)
+        if litter.kits_remaining > 0:
+            return Response(build_error_response(
+                message_default='Action impossible',
+                errors={'status': f"Il reste {litter.kits_remaining} lapereau(x) à sevrer."}
+            ), status=status.HTTP_400_BAD_REQUEST)
+        mating.status = Mating.Status.COMPLETED
+        mating.save(update_fields=['status', 'updated_at'])
+        return self._mating_response(request, mating, 'Accouplement terminé : réussi')
+
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):
         """

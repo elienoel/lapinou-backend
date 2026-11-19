@@ -195,7 +195,10 @@ class CageTests(APITestCase):
             [(c['number'], c['row'], c['column']) for c in data['compartments']],
             [(1, 1, 1), (2, 1, 2), (3, 1, 3), (4, 2, 1), (5, 2, 2), (6, 2, 3)],
         )
-        self.assertEqual(self._create_cage(name='B', columns_count=7).status_code, 400)
+        # Colonnes illimitées, lignes limitées à 5
+        self.assertEqual(self._create_cage(name='B', columns_count=12).status_code, 201)
+        self.assertEqual(self._create_cage(name='C', rows_count=5).status_code, 201)
+        self.assertEqual(self._create_cage(name='D', rows_count=6).status_code, 400)
 
     def test_grid_rabbit_in_second_column(self):
         cage = self._create_cage(rows_count=2, columns_count=2).data['data']
@@ -529,6 +532,47 @@ class MatingWorkflowTests(APITestCase):
         self.client.post(f"/api/farm/matings/{mating['id']}/palpation/", {}, format='json')
         url = f"/api/farm/matings/{mating['id']}/cancel/"
         self.assertEqual(self.client.post(url, {}, format='json').status_code, 200)
+        self.assertEqual(self.client.post(url, {}, format='json').status_code, 400)
+
+    # --- boîte à nid et clôture -------------------------------------
+
+    def test_nest_box_is_recorded_during_gestation_only(self):
+        mating = self._mating(days_ago=28)
+        url = f"/api/farm/matings/{mating['id']}/nest-box/"
+        res = self.client.post(url, {'done_at': date.today().isoformat()}, format='json')
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.data['data']['nest_box_done_at'], date.today().isoformat())
+        # date hors bornes
+        too_early = (date.today() - timedelta(days=40)).isoformat()
+        self.assertEqual(self.client.post(url, {'done_at': too_early}, format='json').status_code, 400)
+        # plus possible une fois l'accouplement échoué
+        self.client.post(f"/api/farm/matings/{mating['id']}/cancel/", {}, format='json')
+        self.assertEqual(self.client.post(url, {}, format='json').status_code, 400)
+
+    def test_complete_needs_a_fully_weaned_litter(self):
+        mating = self._mating(days_ago=80)
+        url = f"/api/farm/matings/{mating['id']}/complete/"
+        # avant la mise bas : refusé
+        self.assertEqual(self.client.post(url, {}, format='json').status_code, 400)
+
+        birth = (date.today() - timedelta(days=48)).isoformat()
+        litter = self.client.post('/api/farm/litters/', {
+            'mating': mating['id'], 'birth_date': birth, 'born_alive': 3,
+        }, format='json')
+        self.assertEqual(litter.status_code, 201, litter.content)
+        # lapereaux encore au nid : refusé
+        res = self.client.post(url, {}, format='json')
+        self.assertEqual(res.status_code, 400)
+        self.assertIn('3 lapereau', str(res.data))
+
+        wean = self.client.post(
+            f"/api/farm/litters/{litter.data['data']['id']}/wean/", {'count': 3}, format='json'
+        )
+        self.assertEqual(wean.status_code, 200, wean.content)
+        res = self.client.post(url, {}, format='json')
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.data['data']['status'], 'completed')
+        # une seule fois
         self.assertEqual(self.client.post(url, {}, format='json').status_code, 400)
 
     def test_other_users_cannot_act_on_a_mating(self):

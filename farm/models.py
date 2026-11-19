@@ -45,8 +45,8 @@ class Cage(SyncableModel):
     Les loges sont numérotées ligne par ligne, de haut en bas puis de gauche à droite
     (1 = loge en haut à gauche).
     """
-    MAX_ROWS = 12
-    MAX_COLUMNS = 6
+    # Au plus 5 étages de loges ; le nombre de colonnes n'est pas limité
+    MAX_ROWS = 5
 
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -65,7 +65,7 @@ class Cage(SyncableModel):
     )
     columns_count = models.PositiveSmallIntegerField(
         default=1,
-        validators=[MinValueValidator(1), MaxValueValidator(MAX_COLUMNS)],
+        validators=[MinValueValidator(1)],
         help_text="Nombre de colonnes de loges"
     )
     notes = models.TextField(blank=True, null=True)
@@ -209,6 +209,8 @@ class Mating(SyncableModel):
         PENDING = 'pending', 'En attente palpation'
         CONFIRMED = 'confirmed', 'Gestante confirmée'
         KINDLED = 'kindled', 'Mise bas réalisée'
+        # Portée sevrée et accouplement clôturé par l'éleveur
+        COMPLETED = 'completed', 'Réussi'
         FAILED = 'failed', 'Infructueux'
 
     owner = models.ForeignKey(
@@ -237,6 +239,7 @@ class Mating(SyncableModel):
     palpation_date = models.DateField(null=True, blank=True, help_text="Date palpation prévue (~J+12)")
     palpation_done_at = models.DateField(null=True, blank=True, help_text="Date à laquelle la palpation a été effectuée")
     nest_box_date = models.DateField(null=True, blank=True, help_text="Pose boîte à nid (~J+28)")
+    nest_box_done_at = models.DateField(null=True, blank=True, help_text="Date à laquelle la boîte à nid a été posée")
     expected_kindling_date = models.DateField(null=True, blank=True, help_text="Date prévue mise bas (~J+31)")
     notes = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)

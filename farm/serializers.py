@@ -222,11 +222,11 @@ class MatingSerializer(serializers.ModelSerializer, UserActionMixinSerializer):
             'id', 'owner', 'male', 'male_name', 'male_tag',
             'female', 'female_name', 'female_tag',
             'mating_date', 'status', 'status_display',
-            'palpation_date', 'palpation_done_at', 'nest_box_date', 'expected_kindling_date',
-            'notes', 'client_uuid', 'is_deleted', 'created_at', 'updated_at', 'created_by_user'
+            'palpation_date', 'palpation_done_at', 'nest_box_date', 'nest_box_done_at',
+            'expected_kindling_date', 'notes', 'client_uuid', 'is_deleted', 'created_at', 'updated_at', 'created_by_user'
         ]
-        # La palpation se confirme par l'action `palpation`, l'échec par l'action `cancel`
-        read_only_fields = ['id', 'owner', 'palpation_done_at', 'is_deleted', 'created_at', 'updated_at', 'created_by_user']
+        # Les étapes passent par les actions `palpation`, `nest-box`, `complete` et `cancel`
+        read_only_fields = ['id', 'owner', 'palpation_done_at', 'nest_box_done_at', 'is_deleted', 'created_at', 'updated_at', 'created_by_user']
 
     def validate(self, attrs):
         male = attrs.get('male', getattr(self.instance, 'male', None))
