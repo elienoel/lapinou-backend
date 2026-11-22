@@ -154,6 +154,15 @@ class Rabbit(SyncableModel):
         limit_choices_to={'gender': Gender.FEMALE},
         help_text="Mère (femelle)"
     )
+    # Portée d'origine : fiche créée au sevrage ou plus tard pour un lapereau sevré
+    litter = models.ForeignKey(
+        'Litter',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='kits',
+        help_text="Portée dont le lapin est issu"
+    )
 
     status = models.CharField(
         max_length=20,
@@ -299,6 +308,9 @@ class Litter(SyncableModel):
     # Date PRÉVUE du sevrage (~J+45) et date du dernier sevrage RÉEL
     weaning_date = models.DateField(null=True, blank=True, help_text="Date sevrage prévue (~J+45)")
     weaned_at = models.DateField(null=True, blank=True, help_text="Date du dernier sevrage effectué")
+    # Lapereaux sevrés sortis du cheptel avant d'avoir reçu une fiche
+    weaned_sold_count = models.PositiveIntegerField(default=0)
+    weaned_died_count = models.PositiveIntegerField(default=0)
     notes = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -321,6 +333,25 @@ class Litter(SyncableModel):
     def kits_remaining(self):
         """Lapereaux encore au nid : nés vivants, ni sevrés ni morts."""
         return max(self.born_alive - (self.weaned_count or 0) - self.died_count, 0)
+
+    @property
+    def registered_count(self):
+        """Lapereaux sevrés qui ont reçu une fiche lapin."""
+        return self.kits.filter(is_deleted=False).count()
+
+    @property
+    def kits_unregistered(self):
+        """Lapereaux sevrés toujours dans le cheptel, sans fiche (ni nommés, ni placés)."""
+        return max(
+            (self.weaned_count or 0) - self.registered_count
+            - self.weaned_sold_count - self.weaned_died_count,
+            0,
+        )
+
+    @property
+    def kits_present(self):
+        """Lapereaux de la portée encore présents sans fiche : au nid + sevrés à nommer."""
+        return self.kits_remaining + self.kits_unregistered
 
     @property
     def age_days(self):

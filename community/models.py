@@ -1,5 +1,35 @@
+import base64
+import io
+import logging
+
 from django.conf import settings
 from django.db import models
+
+logger = logging.getLogger(__name__)
+
+
+def image_preview(file, max_side=24):
+    """
+    Aperçu minuscule d'une image (JPEG en base64, ~1 Ko) affiché flouté avant
+    le téléchargement, avec ses dimensions réelles. Renvoie ('', 0, 0) si le
+    fichier n'est pas une image lisible.
+    """
+    from PIL import Image, ImageOps
+    try:
+        file.open('rb')
+        file.seek(0)
+        with Image.open(file) as img:
+            img = ImageOps.exif_transpose(img)
+            width, height = img.size
+            img = img.convert('RGB')
+            img.thumbnail((max_side, max_side))
+            out = io.BytesIO()
+            img.save(out, format='JPEG', quality=60)
+        file.seek(0)
+        return base64.b64encode(out.getvalue()).decode('ascii'), width, height
+    except Exception as exc:  # fichier corrompu ou non image
+        logger.warning("Aperçu impossible pour %s : %s", getattr(file, 'name', file), exc)
+        return '', 0, 0
 
 
 # Réactions autorisées (type WhatsApp) : une seule par utilisateur et par élément
@@ -47,10 +77,25 @@ class PostMedia(models.Model):
     file = models.FileField(upload_to='community_posts/media/')
     media_type = models.CharField(max_length=10, choices=MediaType.choices)
     position = models.PositiveSmallIntegerField(default=0)
+    # Aperçu flou (images) affiché avant téléchargement, et poids du fichier
+    preview = models.TextField(blank=True, default='')
+    width = models.PositiveIntegerField(default=0)
+    height = models.PositiveIntegerField(default=0)
+    size = models.PositiveIntegerField(default=0, help_text='Poids du fichier en octets')
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['position', 'id']
+
+    def save(self, *args, **kwargs):
+        if self.file and not self.size:
+            try:
+                self.size = self.file.size
+            except (OSError, ValueError):
+                pass
+        if self.file and self.media_type == self.MediaType.IMAGE and not self.preview:
+            self.preview, self.width, self.height = image_preview(self.file)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.get_media_type_display()} #{self.position} de la publication {self.post_id}"

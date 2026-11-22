@@ -52,6 +52,18 @@ class PostMediaTests(APITestCase):
         self.assertEqual(res.data['data']['title'], '')
         self.assertEqual(PostMedia.objects.count(), 3)
 
+    def test_images_come_with_a_tiny_blurred_preview_and_their_size(self):
+        res = self._post({'media': [png_file('big.png', size=(400, 300)), video_file()]})
+        self.assertEqual(res.status_code, 201, res.content)
+        image, video = res.data['data']['media']
+        # aperçu JPEG minuscule en base64, dimensions réelles et poids du fichier
+        self.assertTrue(image['preview'].startswith('/9j/'))
+        self.assertLess(len(image['preview']), 2000)
+        self.assertEqual((image['width'], image['height']), (400, 300))
+        self.assertGreater(image['size'], 0)
+        self.assertEqual(video['preview'], '')
+        self.assertGreater(video['size'], 0)
+
     def test_text_only_and_media_only_posts(self):
         self.assertEqual(self._post({'content': 'Bonjour'}).status_code, 201)
         self.assertEqual(self._post({'media': [png_file()]}).status_code, 201)

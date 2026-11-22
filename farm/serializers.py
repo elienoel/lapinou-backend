@@ -51,13 +51,14 @@ class RabbitSerializer(serializers.ModelSerializer, UserActionMixinSerializer):
             'breed', 'breed_name', 'birth_date', 'color', 'cage_number',
             'cage', 'cage_name', 'compartment_number', 'nursing_kits',
             'sire', 'sire_name', 'sire_tag',
-            'dam', 'dam_name', 'dam_tag',
+            'dam', 'dam_name', 'dam_tag', 'litter',
             'status', 'status_display', 'weight_kg', 'photo',
             'images',
             'avatar_color_index', 'notes', 'client_uuid', 'is_deleted', 'created_at', 'updated_at',
             'created_by_user'
         ]
-        read_only_fields = ['id', 'owner', 'images', 'nursing_kits', 'is_deleted', 'created_at', 'updated_at', 'created_by_user']
+        # La portée d'origine est renseignée par le sevrage ou l'enregistrement des lapereaux
+        read_only_fields = ['id', 'owner', 'images', 'nursing_kits', 'litter', 'is_deleted', 'created_at', 'updated_at', 'created_by_user']
 
     def validate(self, attrs):
         instance = self.instance
@@ -250,6 +251,9 @@ class LitterSerializer(serializers.ModelSerializer, UserActionMixinSerializer):
     father_tag = serializers.CharField(source='father.tag_number', read_only=True)
     total_born = serializers.IntegerField(read_only=True)
     kits_remaining = serializers.IntegerField(read_only=True)
+    registered_count = serializers.IntegerField(read_only=True)
+    kits_unregistered = serializers.IntegerField(read_only=True)
+    kits_present = serializers.IntegerField(read_only=True)
     age_days = serializers.IntegerField(read_only=True)
     days_until_weaning = serializers.IntegerField(read_only=True)
     weaning_status = serializers.CharField(read_only=True)
@@ -264,13 +268,16 @@ class LitterSerializer(serializers.ModelSerializer, UserActionMixinSerializer):
             'mother_cage', 'mother_compartment',
             'birth_date', 'born_alive', 'still_born', 'died_count', 'total_born',
             'weaned_count', 'weaned_at', 'weaning_date',
-            'kits_remaining', 'age_days', 'days_until_weaning', 'weaning_status',
+            'weaned_sold_count', 'weaned_died_count',
+            'kits_remaining', 'registered_count', 'kits_unregistered', 'kits_present',
+            'age_days', 'days_until_weaning', 'weaning_status',
             'notes', 'client_uuid', 'is_deleted', 'created_at', 'updated_at', 'created_by_user'
         ]
-        # Le sevrage (`weaned_count`, `weaned_at`) ne se modifie que par l'action `wean`
+        # Le sevrage et le devenir des sevrés ne se modifient que par les actions dédiées
         read_only_fields = [
             'id', 'owner', 'total_born', 'weaned_count', 'weaned_at',
-            'kits_remaining', 'age_days', 'days_until_weaning', 'weaning_status',
+            'weaned_sold_count', 'weaned_died_count',
+            'kits_remaining', 'registered_count', 'kits_unregistered', 'kits_present', 'age_days', 'days_until_weaning', 'weaning_status',
             'is_deleted', 'created_at', 'updated_at', 'created_by_user'
         ]
         # La mère et le père sont déduits de l'accouplement sélectionné

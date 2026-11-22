@@ -61,7 +61,7 @@ class PostMediaSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PostMedia
-        fields = ['id', 'media_type', 'url', 'position']
+        fields = ['id', 'media_type', 'url', 'position', 'preview', 'width', 'height', 'size']
         read_only_fields = fields
 
     @extend_schema_field(serializers.CharField())
@@ -123,6 +123,8 @@ class PostSerializer(serializers.ModelSerializer, UserActionMixinSerializer):
                 'media_type': PostMedia.MediaType.IMAGE,
                 'url': request.build_absolute_uri(url) if request else url,
                 'position': -1,
+                # Ancienne image : pas d'aperçu, elle s'affiche directement
+                'preview': '', 'width': 0, 'height': 0, 'size': 0,
             }
             return [legacy, *items]
         return list(items)

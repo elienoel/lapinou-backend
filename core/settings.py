@@ -67,6 +67,7 @@ INSTALLED_APPS = [
     'chat.apps.ChatConfig',
     'pharmacy.apps.PharmacyConfig',
     'promotions.apps.PromotionsConfig',
+    'subscriptions.apps.SubscriptionsConfig',
 ]
 
 MIDDLEWARE = [
@@ -230,3 +231,13 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
+
+
+# Paiement des abonnements (GeniusPay). Clés sandbox (pk_sandbox_/sk_sandbox_) ou live.
+GENIUSPAY_BASE_URL = os.environ.get('GENIUSPAY_BASE_URL', 'https://pay.genius.ci/api/v1/merchant')
+GENIUSPAY_API_KEY = os.environ.get('GENIUSPAY_API_KEY', '')
+GENIUSPAY_API_SECRET = os.environ.get('GENIUSPAY_API_SECRET', '')
+GENIUSPAY_WEBHOOK_SECRET = os.environ.get('GENIUSPAY_WEBHOOK_SECRET', '')
+# Pages affichées après paiement (facultatif : l'app relit le statut au retour)
+GENIUSPAY_SUCCESS_URL = os.environ.get('GENIUSPAY_SUCCESS_URL', '')
+GENIUSPAY_ERROR_URL = os.environ.get('GENIUSPAY_ERROR_URL', '')

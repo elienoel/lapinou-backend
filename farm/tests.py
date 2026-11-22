@@ -4,6 +4,9 @@ from datetime import date, timedelta
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient, APITestCase
 
+from subscriptions import plans
+from subscriptions.services import get_subscription
+
 from .models import Cage, Litter, Mating, Rabbit
 
 
@@ -234,6 +237,8 @@ class LitterWeaningTests(APITestCase):
             owner=self.user, name='Bella', tag_number='F1', gender='F', birth_date=born,
             color='Fauve', status=Rabbit.Status.LACTATING,
         )
+        # Ces tests portent sur les portées, pas sur les limites d'abonnement
+        get_subscription(self.user).credit(plans.PRO)
 
     def _litter(self, days_ago=10, alive=7, **extra):
         birth = date.today() - timedelta(days=days_ago)
@@ -348,11 +353,69 @@ class LitterWeaningTests(APITestCase):
         self.assertFalse(Rabbit.objects.filter(tag_number='K9').exists(), 'rien n\'est créé')
         self.assertEqual(self.client.get(f"/api/farm/litters/{litter['id']}/").data['data']['kits_remaining'], 3)
 
-    def test_records_count_must_match_and_gender_is_required(self):
+    def test_records_cannot_exceed_count_and_gender_is_required(self):
         litter = self._litter(alive=3)
-        one = [{'name': 'A', 'tag_number': 'K1', 'gender': 'M'}]
-        self.assertEqual(self._wean(litter['id'], count=2, rabbits=one).status_code, 400)
+        two = [{'name': 'A', 'tag_number': 'K1', 'gender': 'M'}, {'name': 'B', 'tag_number': 'K2', 'gender': 'F'}]
+        self.assertEqual(self._wean(litter['id'], count=1, rabbits=two).status_code, 400)
         self.assertEqual(self._wean(litter['id'], count=1, rabbits=[{'name': 'A', 'tag_number': 'K1'}]).status_code, 400)
+
+    # --- lapereaux sevrés à nommer plus tard -------------------------------
+
+    def _post(self, litter_id, action, **body):
+        return self.client.post(f'/api/farm/litters/{litter_id}/{action}/', body, format='json')
+
+    def test_weaned_kits_without_records_stay_present_until_named(self):
+        litter = self._litter(alive=6)
+        res = self._wean(litter['id'], count=4, rabbits=[{'name': 'Petit 1', 'tag_number': 'K1', 'gender': 'M'}])
+        self.assertEqual(res.status_code, 200, res.content)
+        data = res.data['data']['litter']
+        self.assertEqual(
+            (data['kits_remaining'], data['registered_count'], data['kits_unregistered'], data['kits_present']),
+            (2, 1, 3, 5),
+        )
+        self.assertEqual(Rabbit.objects.get(tag_number='K1').litter_id, litter['id'])
+
+    def test_kits_can_be_registered_later_even_after_the_mating_is_completed(self):
+        mating = Mating.objects.create(
+            owner=self.user, male=self.buck, female=self.doe,
+            mating_date=date.today() - timedelta(days=80), status=Mating.Status.KINDLED,
+        )
+        litter = self._litter(alive=3, mating=mating.id)
+        self._wean(litter['id'], count=3)
+        self.assertEqual(self.client.post(f'/api/farm/matings/{mating.id}/complete/').status_code, 200)
+
+        cage = Cage.objects.create(owner=self.user, name='B1', rows_count=2)
+        res = self._post(litter['id'], 'register-kits', cage=cage.id, compartment_number=1, rabbits=[
+            {'name': 'Neige', 'tag_number': 'K7', 'gender': 'F'},
+            {'name': 'Tonnerre', 'tag_number': 'K8', 'gender': 'M'},
+        ])
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.data['data']['litter']['kits_unregistered'], 1)
+        kit = Rabbit.objects.get(tag_number='K7')
+        self.assertEqual((kit.dam_id, kit.sire_id, kit.litter_id), (self.doe.id, self.buck.id, litter['id']))
+        self.assertEqual((kit.cage_id, kit.compartment_number), (cage.id, 1))
+
+        too_many = [{'name': f'X{i}', 'tag_number': f'X{i}', 'gender': 'M'} for i in range(2)]
+        self.assertEqual(self._post(litter['id'], 'register-kits', rabbits=too_many).status_code, 400)
+
+    def test_sold_or_dead_weaned_kits_leave_the_herd(self):
+        litter = self._litter(alive=5)
+        self._wean(litter['id'], count=5)
+        res = self._post(litter['id'], 'release-kits', count=2, reason='sold')
+        self.assertEqual(res.status_code, 200, res.content)
+        res = self._post(litter['id'], 'release-kits', count=1, reason='died')
+        data = res.data['data']['litter']
+        self.assertEqual((data['weaned_sold_count'], data['weaned_died_count'], data['kits_present']), (2, 1, 2))
+        self.assertEqual(self._post(litter['id'], 'release-kits', count=3, reason='sold').status_code, 400)
+        self.assertEqual(self._post(litter['id'], 'release-kits', count=1, reason='perdu').status_code, 400)
+
+    def test_deleted_kit_record_returns_to_unregistered(self):
+        litter = self._litter(alive=2)
+        self._wean(litter['id'], count=2, rabbits=[{'name': 'A', 'tag_number': 'K1', 'gender': 'M'}])
+        kit = Rabbit.objects.get(tag_number='K1')
+        self.client.delete(f'/api/farm/rabbits/{kit.id}/')
+        data = self.client.get(f"/api/farm/litters/{litter['id']}/").data['data']
+        self.assertEqual(data['kits_unregistered'], 2)
 
     def test_mother_stays_lactating_while_another_litter_is_at_the_nest(self):
         first = self._litter(days_ago=30, alive=2)
@@ -663,7 +726,34 @@ class CareTests(APITestCase):
         other = APIClient()
         other.force_authenticate(self.other)
         res = other.get('/api/farm/care-treatments/?all=true')
-        self.assertEqual(res.data['data'], [])
+        self.assertNotIn('Vaccin VHD2', [t['name'] for t in res.data['data']])
+
+    def test_new_account_gets_default_care_treatments(self):
+        from .defaults import DEFAULT_CARE_TREATMENTS
+        newcomer = get_user_model().objects.create_user(username='nouveau', password='x')
+        client = APIClient()
+        client.force_authenticate(newcomer)
+        treatments = client.get('/api/farm/care-treatments/?all=true').data['data']
+        self.assertEqual(len(treatments), len(DEFAULT_CARE_TREATMENTS))
+        vhd = next(t for t in treatments if t['name'] == 'Vaccin VHD (VHD1 + VHD2)')
+        self.assertEqual((vhd['category'], vhd['renewal_days']), ('vaccine', 180))
+
+        # l'éleveur peut les modifier et les supprimer
+        res = client.patch(f"/api/farm/care-treatments/{vhd['id']}/", {'renewal_days': 365}, format='json')
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(client.delete(f"/api/farm/care-treatments/{vhd['id']}/").status_code, 200)
+
+    def test_defaults_are_never_duplicated_or_brought_back(self):
+        from .defaults import DEFAULT_CARE_TREATMENTS, create_default_care_treatments
+        from .models import CareTreatment
+        deleted = CareTreatment.objects.get(owner=self.user, name='Vaccin Myxomatose')
+        deleted.is_deleted = True
+        deleted.save()
+        create_default_care_treatments(self.user)
+        self.assertEqual(
+            CareTreatment.objects.filter(owner=self.user).count(), len(DEFAULT_CARE_TREATMENTS)
+        )
+        self.assertTrue(CareTreatment.objects.get(pk=deleted.pk).is_deleted)
 
     def test_record_computes_next_due_date_and_lists_rabbits(self):
         treatment = self._treatment(renewal_days=30)

@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from drf_spectacular.utils import extend_schema
 
 from core.utils import CustomViewSet, build_success_response, build_error_response
+from subscriptions.services import ensure_can_add_rabbits
 from .models import (
     Breed, Cage, Rabbit, RabbitImage, Mating, Litter,
     CareTreatment, CareRecord, CareEvent, FinanceTransaction,
@@ -113,6 +114,13 @@ class RabbitViewSet(CustomViewSet):
         ('Poids (kg)', ['weight_kg']),
     ]
     export_filename = "lapins.xlsx"
+
+    def create(self, request):
+        # Un renvoi de la synchro hors-ligne (client_uuid déjà connu) n'ajoute pas de fiche
+        client_uuid = request.data.get('client_uuid') if hasattr(request.data, 'get') else None
+        if not (client_uuid and self.get_queryset().filter(client_uuid=client_uuid).exists()):
+            ensure_can_add_rabbits(request.user, 1)
+        return super().create(request)
 
     @action(detail=True, methods=['get'])
     def genealogy(self, request, pk=None):
@@ -570,9 +578,10 @@ class LitterViewSet(CustomViewSet):
     def wean(self, request, pk=None):
         """
         Enregistre un sevrage (total ou partiel) : `count` lapereaux, à la date `weaned_at`
-        (aujourd'hui par défaut). Si `rabbits` est fourni (une entrée {name, tag_number, gender,
-        color?} par lapereau sevré), leurs fiches sont créées, rattachées à la mère et au père,
-        et placées dans la même loge que la mère.
+        (aujourd'hui par défaut). `rabbits` (facultatif, au plus `count` entrées {name, tag_number,
+        gender, color?}) crée les fiches des lapereaux déjà nommés, rattachées à la portée, à la
+        mère et au père, dans la loge de la mère. Les autres restent « à nommer » et peuvent
+        recevoir leur fiche plus tard (action `register-kits`).
         """
         litter = self.get_object(pk=pk)
         remaining = litter.kits_remaining
@@ -598,41 +607,24 @@ class LitterViewSet(CustomViewSet):
             return self._wean_error({'weaned_at': 'Le sevrage ne peut pas précéder la naissance.'})
 
         kits = data.get('rabbits') or []
-        if kits and len(kits) != count:
-            return self._wean_error({'rabbits': f"{count} fiche(s) attendue(s), {len(kits)} reçue(s)."})
+        if len(kits) > count:
+            return self._wean_error({'rabbits': f"{count} fiche(s) au plus, {len(kits)} reçue(s)."})
+        ensure_can_add_rabbits(request.user, len(kits))
 
         mother = litter.mother
         in_cage = bool(mother.cage_id and mother.compartment_number)
         try:
             with transaction.atomic():
-                created = []
-                errors = {}
-                for index, kit in enumerate(kits):
-                    payload = {
-                        'name': kit.get('name'),
-                        'tag_number': kit.get('tag_number'),
-                        'gender': kit.get('gender'),
-                        'color': kit.get('color') or mother.color,
-                        'birth_date': litter.birth_date,
-                        'sire': litter.father_id,
-                        'dam': mother.id,
-                        'breed': mother.breed_id,
-                        # ils sont encore dans la loge de leur mère au moment du sevrage
-                        'cage': in_cage and mother.cage_id or None,
-                        'compartment_number': in_cage and mother.compartment_number or None,
-                        'status': Rabbit.Status.ACTIVE,
-                    }
-                    serializer = RabbitSerializer(data=payload, context={'request': request})
-                    if serializer.is_valid():
-                        created.append(serializer.save(owner=request.user))
-                    else:
-                        errors[str(index)] = serializer.errors
-                if errors:
-                    raise ValueError(errors)
-
                 litter.weaned_count = (litter.weaned_count or 0) + count
                 litter.weaned_at = weaned_at
                 litter.save(update_fields=['weaned_count', 'weaned_at', 'updated_at'])
+
+                # ils sont encore dans la loge de leur mère au moment du sevrage
+                created = self._create_kits(
+                    request, litter, kits,
+                    cage=mother.cage_id if in_cage else None,
+                    compartment=mother.compartment_number if in_cage else None,
+                )
 
                 # Portée entièrement sevrée : la mère n'allaite plus (sauf autre portée au nid)
                 if litter.kits_remaining == 0 and mother.status == Rabbit.Status.LACTATING:
@@ -646,14 +638,105 @@ class LitterViewSet(CustomViewSet):
         except ValueError as exc:
             return self._wean_error({'rabbits': exc.args[0]})
 
+        return self._kits_response(request, litter, created, 'litter-weaned', f'{count} lapereau(x) sevré(s)')
+
+    @action(detail=True, methods=['post'], url_path='register-kits')
+    def register_kits(self, request, pk=None):
+        """
+        Crée les fiches de lapereaux déjà sevrés mais pas encore nommés, à tout moment, même
+        après la clôture de l'accouplement. `rabbits` : une entrée {name, tag_number, gender,
+        color?} par lapereau ; `cage` + `compartment_number` (facultatifs) : loge où les placer.
+        """
+        litter = self.get_object(pk=pk)
+        available = litter.kits_unregistered
+        kits = request.data.get('rabbits') or []
+        if not available:
+            return self._wean_error({'rabbits': "Aucun lapereau sevré n'attend de fiche dans cette portée."})
+        if not 1 <= len(kits) <= available:
+            return self._wean_error({'rabbits': f"Entre 1 et {available} lapereau(x) à enregistrer."})
+
+        ensure_can_add_rabbits(request.user, len(kits))
+
+        cage = request.data.get('cage') or None
+        compartment = request.data.get('compartment_number') or None
+        if bool(cage) != bool(compartment):
+            return self._wean_error({'compartment_number': 'Choisissez une cage et une loge.'})
+        try:
+            with transaction.atomic():
+                created = self._create_kits(request, litter, kits, cage=cage, compartment=compartment)
+        except ValueError as exc:
+            return self._wean_error({'rabbits': exc.args[0]})
+
+        return self._kits_response(
+            request, litter, created, 'kits-registered', f'{len(created)} lapereau(x) enregistré(s)'
+        )
+
+    @action(detail=True, methods=['post'], url_path='release-kits')
+    def release_kits(self, request, pk=None):
+        """
+        Retire du cheptel `count` lapereaux sevrés sans fiche, vendus (`reason` = sold)
+        ou morts (`reason` = died).
+        """
+        litter = self.get_object(pk=pk)
+        available = litter.kits_unregistered
+        reason = request.data.get('reason')
+        if reason not in ('sold', 'died'):
+            return self._wean_error({'reason': 'Indiquez si les lapereaux sont vendus ou morts.'})
+        try:
+            count = int(request.data.get('count'))
+        except (TypeError, ValueError):
+            count = 0
+        if not 1 <= count <= available:
+            return self._wean_error({
+                'count': f"Entre 1 et {available} lapereau(x) sevré(s) sans fiche." if available
+                else "Aucun lapereau sevré sans fiche dans cette portée."
+            })
+
+        field = 'weaned_sold_count' if reason == 'sold' else 'weaned_died_count'
+        setattr(litter, field, getattr(litter, field) + count)
+        litter.save(update_fields=[field, 'updated_at'])
+        return self._kits_response(
+            request, litter, [], 'kits-released',
+            f"{count} lapereau(x) {'vendu(s)' if reason == 'sold' else 'mort(s)'}"
+        )
+
+    def _create_kits(self, request, litter, kits, cage=None, compartment=None):
+        """Crée une fiche lapin par lapereau ; lève ValueError({index: erreurs}) si une fiche est invalide."""
+        mother = litter.mother
+        created = []
+        errors = {}
+        for index, kit in enumerate(kits):
+            payload = {
+                'name': kit.get('name'),
+                'tag_number': kit.get('tag_number'),
+                'gender': kit.get('gender'),
+                'color': kit.get('color') or mother.color,
+                'birth_date': litter.birth_date,
+                'sire': litter.father_id,
+                'dam': mother.id,
+                'breed': mother.breed_id,
+                'cage': cage,
+                'compartment_number': compartment,
+                'status': Rabbit.Status.ACTIVE,
+            }
+            serializer = RabbitSerializer(data=payload, context={'request': request})
+            if serializer.is_valid():
+                created.append(serializer.save(owner=request.user, litter=litter))
+            else:
+                errors[str(index)] = serializer.errors
+        if errors:
+            raise ValueError(errors)
+        return created
+
+    def _kits_response(self, request, litter, created, code, message):
         litter = self.get_queryset().get(pk=litter.pk)
         return Response(build_success_response(
             data={
                 'litter': self.serializer_class(litter, context={'request': request}).data,
                 'rabbits': RabbitSerializer(created, many=True, context={'request': request}).data,
             },
-            message_code='litter-weaned',
-            message_default=f'{count} lapereau(x) sevré(s)'
+            message_code=code,
+            message_default=message
         ), status=status.HTTP_200_OK)
 
     @staticmethod
