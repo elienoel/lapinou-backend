@@ -27,6 +27,7 @@ def _request(method, path, body=None):
     url = settings.GENIUSPAY_BASE_URL.rstrip('/') + path
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method, headers={
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'X-API-Key': settings.GENIUSPAY_API_KEY,
         'X-API-Secret': settings.GENIUSPAY_API_SECRET,
         'Content-Type': 'application/json',
